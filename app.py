@@ -314,27 +314,8 @@ def sync(provider):
         if real is not None:
             real["me"] = me_dict(uid)
             return jsonify(real)
-    # Symulowane pobranie aktywnosci (tryb demo / pozostali dostawcy).
-    created, missions, achievements, bonuses = [], [], [], []
-    try:
-        from datetime import date as _date, timedelta as _td
-        n = random.randint(1, 2)
-        for _ in range(n):
-            sport = random.choices(["bieg", "rower", "spacer"], weights=[4, 3, 3])[0]
-            lo, hi = {"bieg": (1, 12), "rower": (5, 40), "spacer": (1, 8)}[sport]
-            km = round(random.uniform(lo, hi), 1)
-            d = (_date.today() - _td(days=random.randint(0, 1))).isoformat()
-            pace = {"bieg": 6, "rower": 3, "spacer": 10}[sport]
-            dur = int(km * pace * random.uniform(0.9, 1.2))
-            res = logic.add_activity(uid, sport, km, d, provider, dur)
-            created.append(res["activity"])
-            missions += res["missions"]
-            achievements += res["achievements"]
-            bonuses += res["bonuses"]
-    except Exception as ex:
-        return jsonify({"error": f"Synchronizacja nie powiodla sie: {ex}"}), 500
-    return jsonify({"ok": True, "created": created, "missions": missions,
-                    "achievements": achievements, "bonuses": bonuses, "me": me_dict(uid)})
+    # Tryb demo WYŁĄCZONY (na życzenie właściciela) - tylko prawdziwa Strava
+    return jsonify({"error": "Tryb demo jest wyłączony. Aktywności są pobierane tylko z prawdziwej Stravy. Połącz konto Strava w profilu (Połącz) i kliknij Synchronizuj, gdy masz nowe aktywności na Stravie."}), 400
 
 
 # --- aktywnosci ---
@@ -393,6 +374,10 @@ def activities():
 @app.post("/api/activities")
 @login_required
 def create_activity():
+    # Ręczne dodawanie tylko dla admina (anty-cheat: uczniowie/nauczyciele tylko przez Stravę)
+    _u = current_user()
+    if not _u or _u["role"] != "admin":
+        return jsonify({"error": "Ręczne dodawanie aktywności jest wyłączone. Aktywności są pobierane tylko ze Stravy. Skontaktuj się z administratorem."}), 403
     data = request.get_json(force=True) or {}
     sport = data.get("type")
     if sport not in SPORTS:
