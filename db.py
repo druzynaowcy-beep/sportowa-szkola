@@ -19,7 +19,7 @@ DB_PATH = os.environ.get(
 TABLES = ["classes", "users", "settings", "connections", "activities", "bonuses",
           "missions", "user_missions", "achievements", "user_achievements",
           "announcements", "announcement_joins", "likes", "comments",
-          "contests", "follows"]
+          "contests", "follows", "pending_activities"]
 
 SCHEMA_SQLITE = """
 CREATE TABLE IF NOT EXISTS classes(
@@ -166,6 +166,18 @@ CREATE TABLE IF NOT EXISTS follows(
 );
 CREATE INDEX IF NOT EXISTS idx_act_user_date ON activities(user_id, date);
 CREATE INDEX IF NOT EXISTS idx_act_date ON activities(date);
+CREATE TABLE IF NOT EXISTS pending_activities(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    file_name TEXT DEFAULT '',
+    sport TEXT NOT NULL,
+    distance_km REAL NOT NULL,
+    duration_min INTEGER DEFAULT 0,
+    date TEXT NOT NULL,
+    status TEXT DEFAULT 'pending',
+    provider TEXT DEFAULT 'gpx',
+    created_at TEXT DEFAULT (datetime('now'))
+);
 """
 
 # Wariant pod PostgreSQL: SERIAL zamiast AUTOINCREMENT, now() zamiast
@@ -316,6 +328,18 @@ CREATE TABLE IF NOT EXISTS follows(
 CREATE INDEX IF NOT EXISTS idx_act_user_date ON activities(user_id, date);
 CREATE INDEX IF NOT EXISTS idx_act_date ON activities(date);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_act_ext ON activities(provider, external_id);
+CREATE TABLE IF NOT EXISTS pending_activities(
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    file_name TEXT DEFAULT '',
+    sport TEXT NOT NULL,
+    distance_km REAL NOT NULL,
+    duration_min INTEGER DEFAULT 0,
+    date TEXT NOT NULL,
+    status TEXT DEFAULT 'pending',
+    provider TEXT DEFAULT 'gpx',
+    created_at TEXT DEFAULT (now()::text)
+);
 """
 
 
@@ -405,6 +429,18 @@ def migrate():
     if USE_PG:
         con = _pg_connect()
         con.execute('CREATE TABLE IF NOT EXISTS settings("key" TEXT PRIMARY KEY, "value" TEXT)')
+        con.execute("""CREATE TABLE IF NOT EXISTS pending_activities(
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            file_name TEXT DEFAULT '',
+            sport TEXT NOT NULL,
+            distance_km REAL NOT NULL,
+            duration_min INTEGER DEFAULT 0,
+            date TEXT NOT NULL,
+            status TEXT DEFAULT 'pending',
+            provider TEXT DEFAULT 'gpx',
+            created_at TEXT DEFAULT (now()::text)
+        )""")
         add = [("connections", "access_token", "TEXT"),
                ("connections", "refresh_token", "TEXT"),
                ("connections", "expires_at", "INTEGER"),
@@ -420,6 +456,18 @@ def migrate():
         return
     con = sqlite3.connect(DB_PATH)
     con.execute("CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT)")
+    con.execute("""CREATE TABLE IF NOT EXISTS pending_activities(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL REFERENCES users(id),
+        file_name TEXT DEFAULT '',
+        sport TEXT NOT NULL,
+        distance_km REAL NOT NULL,
+        duration_min INTEGER DEFAULT 0,
+        date TEXT NOT NULL,
+        status TEXT DEFAULT 'pending',
+        provider TEXT DEFAULT 'gpx',
+        created_at TEXT DEFAULT (datetime('now'))
+    )""")
 
     def cols(table):
         return {r[1] for r in con.execute(f"PRAGMA table_info({table})").fetchall()}

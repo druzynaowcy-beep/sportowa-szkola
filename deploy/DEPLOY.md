@@ -134,14 +134,20 @@ bezczynności i budzi się w ~1 s.
    - `DATABASE_URL` = connection string z Neona (z kroku 1),
    - `SECRET_KEY` = kliknij **Generate** (losowa wartość).
 6. Kliknij **Create Web Service** i poczekaj ~3–5 minut na pierwsze wdrożenie.
-7. Gdy status to **Live**, otwórz **Shell** (przycisk w panelu usługi) i wykonaj:
+7. Utwórz bazę startową. Uwaga: darmowy Render **nie ma konsoli Shell**,
+   więc seed wykonasz z własnego komputera (2 minuty):
+   - zainstaluj Pythona 3.11+ ze strony python.org (na Windows przy instalacji
+     zaznacz „Add python.exe to PATH”),
+   - otwórz terminal w rozpakowanym folderze aplikacji i wykonaj:
    ```bash
+   pip install -r requirements.txt
    python seed.py --reset
    ```
+   przy czym przed seedem ustaw zmienną z adresem bazy (ten z Neona, z kroku 1):
+   - Windows (cmd): `set DATABASE_URL=tutaj-wklej-adres-z-Neona`
+   - Mac/Linux: `export DATABASE_URL=tutaj-wklej-adres-z-Neona`
    To utworzy strukturę bazy i dane startowe (misje, osiągnięcia, konta demo).
-   **Zmień potem hasła do kont demo!** (Wolisz pustą bazę? Zamiast seeda wykonaj:
-   `python -c "from db import init_db, migrate; init_db(); migrate()"` –
-   pierwsza zarejestrowana osoba zostanie wtedy adminem.)
+   **Zmień potem hasła do kont demo!**
 8. Otwórz stronę `https://twojanazwa.onrender.com` – działa 🎉
 9. Zaloguj się, zmień hasło w profilu (karta „Zmiana hasła”) i wpisz klucze
    Stravy w panelu admina (zakładka **Integracje**).

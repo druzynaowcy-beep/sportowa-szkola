@@ -2,10 +2,13 @@
 import csv
 import io
 import json
+import math
 import os
 import random
 import re
 import secrets
+import xml.etree.ElementTree as ET
+from datetime import date as _date
 from datetime import timedelta
 from functools import wraps
 
@@ -26,6 +29,117 @@ app = Flask(__name__, static_folder="static", static_url_path="")
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-zmien-na-produkcji-123")
 app.permanent_session_lifetime = timedelta(days=7)
 app.teardown_appcontext(close_db)
+
+# --- helpers GPX/TCX ---
+def _haversine(lat1, lon1, lat2, lon2):
+    R = 6371.0
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = math.sin(dlat/2)**2 + math.cos(math.radians(lat1))*math.cos(math.radians(lat2))*math.sin(dlon/2)**2
+    return 2*R*math.asin(math.sqrt(a))
+
+def _parse_gpx_tcx(content, filename):
+    """Zwraca (sport, distance_km, duration_min, date_str) lub rzuca ValueError."""
+    text = content.decode('utf-8', errors='ignore') if isinstance(content, bytes) else content
+    # probujemy GPX
+    try:
+        root = ET.fromstring(text.encode('utf-8') if isinstance(text, str) else text)
+    except Exception as e:
+        raise ValueError(f"Niepoprawny plik XML: {e}")
+    ns = {'gpx': 'http://www.topografix.com/GPX/1/1', 'tcx': 'http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2'}
+    # TCX ma <Activities><Activity><Lap><Track><Trackpoint>
+    # GPX ma <trk><trkseg><trkpt lat lon><time>
+    points = []
+    # proba GPX
+    for trkpt in root.findall('.//gpx:trkpt', ns) + root.findall('.//{http://www.topografix.com/GPX/1/1}trkpt') + root.findall('.//trkpt'):
+        try:
+            lat = float(trkpt.get('lat'))
+            lon = float(trkpt.get('lon'))
+            t = trkpt.find('gpx:time', ns)
+            if t is None:
+                t = trkpt.find('time')
+            timestr = t.text if t is not None else None
+            points.append((lat, lon, timestr))
+        except: continue
+    if not points:
+        # proba TCX
+        for tp in root.findall('.//tcx:Trackpoint', ns) + root.findall('.//{http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2}Trackpoint') + root.findall('.//Trackpoint'):
+            lat_el = tp.find('tcx:Position/tcx:LatitudeDegrees', ns)
+            if lat_el is None:
+                lat_el = tp.find('Position/LatitudeDegrees')
+            lon_el = tp.find('tcx:Position/tcx:LongitudeDegrees', ns)
+            if lon_el is None:
+                lon_el = tp.find('Position/LongitudeDegrees')
+            t_el = tp.find('tcx:Time', ns)
+            if t_el is None:
+                t_el = tp.find('Time')
+            try:
+                if lat_el is not None and lon_el is not None:
+                    lat = float(lat_el.text); lon = float(lon_el.text)
+                    timestr = t_el.text if t_el is not None else None
+                    points.append((lat, lon, timestr))
+            except: continue
+    if len(points) < 2:
+        raise ValueError("Plik nie zawiera trasy (min. 2 punkty GPS).")
+    # dystans
+    dist = 0.0
+    for i in range(1, len(points)):
+        dist += _haversine(points[i-1][0], points[i-1][1], points[i][0], points[i][1])
+    dist = round(dist, 2)
+    if dist < 0.1 or dist > 500:
+        # jesli nie da sie policzyc, sprobuj z DistanceMeters w TCX
+        try:
+            dms = []
+            for dm in root.findall('.//tcx:DistanceMeters', ns) + root.findall('.//DistanceMeters'):
+                try: dms.append(float(dm.text))
+                except: pass
+            if dms:
+                alt = round(max(dms)/1000, 2)
+                if 0.1 <= alt <= 500:
+                    dist = alt
+        except: pass
+    if not (0.1 <= dist <= 500):
+        raise ValueError(f"Nieprawidłowy dystans {dist} km (musi być 0.1-500).")
+    # czas
+    duration = 0
+    try:
+        times = [p[2] for p in points if p[2]]
+        if len(times) >= 2:
+            from datetime import datetime
+            def _parse(t):
+                # 2024-01-01T10:00:00Z lub z offsetem
+                t = t.replace('Z', '+00:00')
+                try: return datetime.fromisoformat(t)
+                except: return None
+            t0 = _parse(times[0]); t1 = _parse(times[-1])
+            if t0 and t1:
+                duration = int((t1 - t0).total_seconds() / 60)
+                if duration < 0: duration = 0
+                if duration > 1440: duration = 0
+    except: pass
+    # data = data pierwszego punktu lub dzis
+    datestr = _date.today().isoformat()
+    try:
+        times = [p[2] for p in points if p[2]]
+        if times and times[0]:
+            from datetime import datetime
+            t0 = times[0].replace('Z', '+00:00')
+            datestr = datetime.fromisoformat(t0).date().isoformat()
+    except: pass
+    # sport - proba z nazwy pliku lub typu
+    sport = "bieg"
+    low = (filename or "").lower()
+    if "bike" in low or "rower" in low or "cycl" in low: sport = "rower"
+    elif "walk" in low or "spacer" in low or "hike" in low: sport = "spacer"
+    # jesli w pliku jest <type>bike</type>
+    try:
+        for ty in root.findall('.//gpx:type', ns) + root.findall('.//type') + root.findall('.//tcx:Activity', ns):
+            txt = (ty.text or ty.get('Sport') or '').lower() if hasattr(ty, 'text') else ''
+            if 'bike' in txt or 'cycl' in txt: sport = "rower"; break
+            if 'run' in txt or 'bieg' in txt: sport = "bieg"; break
+            if 'walk' in txt or 'hike' in txt: sport = "spacer"; break
+    except: pass
+    return sport, dist, duration, datestr
 
 
 # --- pomocnicze ---
@@ -405,6 +519,88 @@ def create_activity():
     res["ok"] = True
     return jsonify(res)
 
+
+# --- wgrywanie plikow GPX/TCX do akceptacji ---
+@app.post("/api/activities/upload")
+@login_required
+def upload_activity():
+    if 'file' not in request.files:
+        return jsonify({"error": "Wybierz plik GPX lub TCX."}), 400
+    f = request.files['file']
+    if not f.filename:
+        return jsonify({"error": "Wybierz plik GPX lub TCX."}), 400
+    name = f.filename.lower()
+    if not (name.endswith('.gpx') or name.endswith('.tcx')):
+        return jsonify({"error": "Dozwolone tylko pliki .gpx i .tcx"}), 400
+    content = f.read()
+    if len(content) > 5*1024*1024:
+        return jsonify({"error": "Plik za duży (max 5 MB)."}), 400
+    try:
+        sport, dist, dur, datestr = _parse_gpx_tcx(content, f.filename)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": f"Nie udało się odczytać pliku: {e}"}), 400
+    # walidacja daty
+    try:
+        from datetime import date as _d
+        d = _d.fromisoformat(datestr)
+        if d > _d.today():
+            return jsonify({"error": "Data z pliku jest z przyszłości."}), 400
+    except:
+        datestr = _date.today().isoformat()
+    db = get_db()
+    pid = insert_get_id(
+        "INSERT INTO pending_activities(user_id, file_name, sport, distance_km, duration_min, date, status, provider) VALUES(?,?,?,?,?,?,?,?)",
+        (current_uid(), f.filename, sport, dist, dur, datestr, 'pending', 'gpx')
+    )
+    db.commit()
+    return jsonify({"ok": True, "pending_id": pid, "preview": {"sport": sport, "distance_km": dist, "duration_min": dur, "date": datestr, "file_name": f.filename}})
+
+@app.get("/api/pending-activities")
+@login_required
+def my_pending():
+    db = get_db()
+    rows = rows_to_dicts(db.execute("SELECT * FROM pending_activities WHERE user_id=? ORDER BY created_at DESC", (current_uid(),)).fetchall())
+    return jsonify({"items": rows})
+
+@app.get("/api/admin/pending")
+@login_required
+@admin_required
+def admin_pending():
+    db = get_db()
+    rows = rows_to_dicts(db.execute(
+        """SELECT p.*, u.name AS user_name, u.email, c.name AS class_name
+           FROM pending_activities p JOIN users u ON u.id=p.user_id
+           LEFT JOIN classes c ON c.id=u.class_id
+           WHERE p.status='pending' ORDER BY p.created_at DESC""").fetchall())
+    return jsonify({"items": rows})
+
+@app.post("/api/admin/pending/<int:pid>/approve")
+@login_required
+@admin_required
+def approve_pending(pid):
+    db = get_db()
+    p = db.execute("SELECT * FROM pending_activities WHERE id=?", (pid,)).fetchone()
+    if not p: return jsonify({"error": "Nie znaleziono."}), 404
+    if p["status"] != "pending": return jsonify({"error": "Już rozpatrzono."}), 400
+    # zatwierdz -> dodaj jako aktywność
+    res = logic.add_activity(p["user_id"], p["sport"], p["distance_km"], p["date"], "gpx", p["duration_min"] or 0)
+    db.execute("UPDATE pending_activities SET status='approved' WHERE id=?", (pid,))
+    db.commit()
+    return jsonify({"ok": True, "activity": res["activity"], "missions": res["missions"], "achievements": res["achievements"]})
+
+@app.post("/api/admin/pending/<int:pid>/reject")
+@login_required
+@admin_required
+def reject_pending(pid):
+    db = get_db()
+    p = db.execute("SELECT * FROM pending_activities WHERE id=?", (pid,)).fetchone()
+    if not p: return jsonify({"error": "Nie znaleziono."}), 404
+    if p["status"] != "pending": return jsonify({"error": "Już rozpatrzono."}), 400
+    db.execute("UPDATE pending_activities SET status='rejected' WHERE id=?", (pid,))
+    db.commit()
+    return jsonify({"ok": True})
 
 @app.delete("/api/activities/<int:aid>")
 @login_required

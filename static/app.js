@@ -65,7 +65,8 @@ var NAV = [
   ["#/odznaki", "🏅 Odznaki", "odznaki", true],
   ["#/rekordy", "📜 Rekordy", "rekordy", false],
   ["#/ogloszenia", "📢 Ogłoszenia", "ogloszenia", false],
-  ["#/konkursy", "🎖️ Konkursy", "konkursy", false]
+  ["#/konkursy", "🎖️ Konkursy", "konkursy", false],
+  ["#/poradnik", "📖 Poradnik", "poradnik", false]
 ];
 var currentPage = "home";
 
@@ -118,6 +119,7 @@ function route() {
   else if (h === "/rekordy") page = "rekordy";
   else if (h === "/ogloszenia") page = "ogloszenia";
   else if (h === "/konkursy") page = "konkursy";
+  else if (h === "/poradnik") page = "poradnik";
   else if (h === "/admin") page = "admin";
   else if (h === "/polityka") page = "polityka";
   else if (mUser) { page = "user"; param = mUser[1]; }

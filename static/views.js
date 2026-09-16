@@ -297,15 +297,24 @@ Views.profil = function (app) {
         (stravaCfg ? " Strava: <b>prawdziwa integracja</b> (logowanie przez Stravę)." : " Tryb demo – administrator może włączyć prawdziwą Stravę w panelu (zakładka Integracje).") + "</p></div>" +
         '<div class="card" style="background:#f8fafc"><b>⌚ Zegarek sportowy lub inna aplikacja?</b>' +
         '<div class="small">Większość urządzeń (<b>Garmin, Polar, Suunto, Coros, Apple Watch, Samsung, Amazfit, Huawei…</b>) może <b>automatycznie przesyłać treningi do Stravy</b>. Włącz synchronizację ze Stravą w aplikacji swojego zegarka (zwykle: Ustawienia → Połączone aplikacje / Partnerzy), a tutaj połącz konto Strava – treningi spłyną same, nic więcej nie trzeba robić.</div></div>'; })() +
-        '<div class="card"><h3>➕ Dodaj aktywność ręcznie</h3><form class="form" id="addAct"><div class="form-row">' +
-        '<div><label>Rodzaj</label><select class="select" name="type">' +
-        S.meta.sports.map(function (s) {
-          return '<option value="' + s.id + '">' + s.icon + " " + s.name + " (" + String(s.mult).replace(".", ",") + " pkt/km)</option>";
-        }).join("") + '</select></div><div><label>Dystans (km)</label><input class="input" name="distance_km" type="number" step="0.1" min="0.1" max="500" required></div>' +
-        '<div><label>Data</label><input class="input" name="date" type="date" value="' + new Date().toISOString().slice(0, 10) + '" required></div>' +
-        '<div><label>Czas (min, opcjonalnie)</label><input class="input" name="duration_min" type="number" min="0" max="1440"></div>' +
-        '</div><div class="mt"><button class="btn btn-primary">Zapisz aktywność</button></div></form></div>' +
-        '<div class="card"><h3>🗂️ Moje aktywności</h3>' +
+        (S.me.role === "admin"
+          ? '<div class="card"><h3>➕ Dodaj aktywność ręcznie (tylko admin)</h3><form class="form" id="addAct"><div class="form-row">'
+            + '<div><label>Rodzaj</label><select class="select" name="type">'
+            + S.meta.sports.map(function (s) { return '<option value="' + s.id + '">' + s.icon + " " + s.name + " (" + String(s.mult).replace(".", ",") + " pkt/km)</option>"; }).join("") + '</select></div>'
+            + '<div><label>Dystans (km)</label><input class="input" name="distance_km" type="number" step="0.1" min="0.1" max="500" required></div>'
+            + '<div><label>Data</label><input class="input" name="date" type="date" value="' + new Date().toISOString().slice(0, 10) + '" required></div>'
+            + '<div><label>Czas (min, opcjonalnie)</label><input class="input" name="duration_min" type="number" min="0" max="1440"></div>'
+            + '</div><div class="mt"><button class="btn btn-primary">Zapisz aktywność</button></div></form>'
+            + '<p class="small muted">Ten formularz widzi tylko admin – do testów.</p></div>'
+          : '<div class="card" style="background:#fff7e6;border:1px solid #ffcc80"><h3>➕ Dodaj aktywność</h3><p class="small">⛔ Ręczne wpisywanie jest wyłączone dla uczniów/nauczycieli (anty-cheat). Użyj <b>Stravy</b> (Synchronizuj) lub <b>wgraj plik GPX/TCX</b> poniżej.</p><p class="small muted">Potrzebujesz dodać coś ręcznie? Poproś admina.</p></div>')
+        + '<div class="card"><h3>📤 Wgraj plik GPX/TCX (do akceptacji)</h3>'
+        + '<p class="small muted">Wyeksportuj plik ze Stravy/Garmina/Zegarka (GPX lub TCX) i wgraj tutaj. Trafia do <b>kolejki do zatwierdzenia</b> przez nauczyciela/admina. Po zatwierdzeniu dostaniesz punkty.</p>'
+        + '<form class="form" id="gpxForm" enctype="multipart/form-data"><div class="form-row"><div><label>Plik .gpx / .tcx (max 5 MB)</label><input class="input" type="file" name="file" accept=".gpx,.tcx" required></div>'
+        + '<div style="display:flex;align-items:flex-end"><button class="btn btn-accent">📤 Wyślij do akceptacji</button></div></div></form>'
+        + '<div id="gpxMsg" class="small mt"></div>'
+        + '<div id="myPending" class="mt"></div>'
+        + '<p class="small muted">Jak wyeksportować? <a href="#/poradnik">Zobacz Poradnik →</a></p></div>'
+        + '<div class="card"><h3>🗂️ Moje aktywności</h3>' +
         (acts.length ? acts.map(feedItem).join("") : '<div class="muted">Brak aktywności. Dodaj pierwszą powyżej!</div>') + "</div>";
       app.innerHTML = html;
       bindFeed(app);
@@ -334,7 +343,8 @@ Views.profil = function (app) {
           }).catch(function (e) { handleErr(e); rerender(); });
         });
       });
-      document.getElementById("addAct").addEventListener("submit", function (e) {
+      var addAct = document.getElementById("addAct");
+      if (addAct) addAct.addEventListener("submit", function (e) {
         e.preventDefault();
         POST("/api/activities", {type: e.target.type.value, distance_km: e.target.distance_km.value,
           date: e.target.date.value, duration_min: e.target.duration_min.value || 0}).then(function (d) {
@@ -342,6 +352,33 @@ Views.profil = function (app) {
           celebrate(d, "Aktywność zapisana!");
           refreshMe().then(rerender);
         }).catch(handleErr);
+      });
+      // GPX upload + pending list
+      var gpxForm = document.getElementById("gpxForm");
+      var gpxMsg = document.getElementById("gpxMsg");
+      var myPendingEl = document.getElementById("myPending");
+      function loadMyPending(){
+        if (!myPendingEl) return;
+        GET("/api/pending-activities").then(function(d){
+          if (!d.items.length) { myPendingEl.innerHTML = '<div class="small muted">Brak oczekujących plików. Twoje zatwierdzone aktywności pojawią się w „Moje aktywności”.</div>'; return; }
+          myPendingEl.innerHTML = '<h4 class="small">📋 Twoje pliki w kolejce</h4><table class="table"><tr><th>Plik</th><th>Sport</th><th>Km</th><th>Data</th><th>Status</th></tr>'
+            + d.items.map(function(p){
+              var st = p.status==='pending' ? '<span class="chip">⏳ oczekuje</span>' : p.status==='approved' ? '<span class="chip green">✅ zatwierdzono</span>' : '<span class="chip red">❌ odrzucono</span>';
+              return '<tr><td>'+esc(p.file_name)+'</td><td>'+esc(p.sport)+'</td><td>'+fmtNum(p.distance_km)+'</td><td>'+fmtDate(p.date)+'</td><td>'+st+'</td></tr>';
+            }).join("") + '</table>';
+        }).catch(function(){});
+      }
+      loadMyPending();
+      if (gpxForm) gpxForm.addEventListener("submit", function(e){
+        e.preventDefault();
+        var fd = new FormData(gpxForm);
+        gpxMsg.textContent = "Wysyłanie…";
+        fetch("/api/activities/upload", {method:"POST", body: fd}).then(function(res){
+          return res.json().then(function(data){ if(!res.ok) throw new Error(data.error||"Błąd"); return data; });
+        }).then(function(d){
+          gpxMsg.innerHTML = '<span class="chip green">✅ Wysłano: '+esc(d.preview.file_name)+' – '+esc(d.preview.sport)+' '+fmtNum(d.preview.distance_km)+' km ('+fmtDate(d.preview.date)+') – czeka na akceptację</span>';
+          gpxForm.reset(); loadMyPending(); toast("Plik wysłany do akceptacji! 📤","ok");
+        }).catch(function(err){ gpxMsg.innerHTML = '<span class="chip red">❌ '+esc(err.message)+'</span>'; });
       });
       document.getElementById("editAva").addEventListener("click", avatarModal);
       document.getElementById("pwf").addEventListener("submit", function (e) {
@@ -724,6 +761,7 @@ Views.admin = function (app) {
     '<button data-t="users" class="' + (AD.tab === "users" ? "active" : "") + '">👥 Użytkownicy</button>' +
     '<button data-t="classes" class="' + (AD.tab === "classes" ? "active" : "") + '">🏫 Klasy</button>' +
     '<button data-t="missions" class="' + (AD.tab === "missions" ? "active" : "") + '">🎯 Misje</button>' +
+    '<button data-t="pending" class="' + (AD.tab === "pending" ? "active" : "") + '">⏳ Oczekujące</button>' +
     '<button data-t="exp" class="' + (AD.tab === "exp" ? "active" : "") + '">📥 Eksport</button>' +
     '<button data-t="integr" class="' + (AD.tab === "integr" ? "active" : "") + '">🔌 Integracje</button></div>' +
     '<div id="adbody"></div></div>';
@@ -830,6 +868,30 @@ Views.admin = function (app) {
         });
       });
     }).catch(handleErr);
+  } else if (AD.tab === "pending") {
+    body.innerHTML = '<div class="card"><h3>⏳ Oczekujące pliki GPX/TCX</h3><p class="small muted">Pliki wgrane przez uczniów – zatwierdź by dodać punkty, lub odrzuć.</p><div id="pendingList"><div class="muted">Ładowanie…</div></div></div>';
+    function loadPending(){
+      GET("/api/admin/pending").then(function(d){
+        var el = document.getElementById("pendingList");
+        if (!d.items.length) { el.innerHTML = '<div class="muted">Brak oczekujących plików. 🎉</div>'; return; }
+        el.innerHTML = '<table class="table"><tr><th>Uczeń</th><th>Klasa</th><th>Plik</th><th>Sport</th><th>Km</th><th>Data</th><th></th></tr>'
+          + d.items.map(function(p){
+            return '<tr><td><a href="#/u/'+p.user_id+'">'+esc(p.user_name)+'</a><div class="small muted">'+esc(p.email)+'</div></td><td>'+esc(p.class_name||"—")+'</td><td>'+esc(p.file_name)+'</td><td>'+esc(p.sport)+'</td><td>'+fmtNum(p.distance_km)+'</td><td>'+fmtDate(p.date)+'</td>'
+              + '<td><div class="btn-row"><button class="btn btn-small btn-primary" data-approve="'+p.id+'">✅ Zatwierdź</button><button class="btn btn-small btn-danger" data-reject="'+p.id+'">❌ Odrzuć</button></div></td></tr>';
+          }).join("") + '</table>';
+        el.querySelectorAll("[data-approve]").forEach(function(b){ b.addEventListener("click", function(){
+          if(!confirm("Zatwierdzić i dodać punkty?")) return;
+          POST("/api/admin/pending/"+b.getAttribute("data-approve")+"/approve").then(function(r){
+            toast("Zatwierdzono: +"+fmtNum(r.activity.points)+" pkt 🎉","ok"); loadPending();
+          }).catch(handleErr);
+        });});
+        el.querySelectorAll("[data-reject]").forEach(function(b){ b.addEventListener("click", function(){
+          if(!confirm("Odrzucić plik?")) return;
+          POST("/api/admin/pending/"+b.getAttribute("data-reject")+"/reject").then(function(){ toast("Odrzucono.","ok"); loadPending(); }).catch(handleErr);
+        });});
+      }).catch(handleErr);
+    }
+    loadPending();
   } else if (AD.tab === "integr") {
     GET("/api/admin/integrations").then(function (d) {
       var s = d.strava;
@@ -933,6 +995,46 @@ function missionModal(m) {
     req.then(function () { closeModal(); toast("Zapisano misję.", "ok"); rerender(); }).catch(handleErr);
   });
 }
+
+/* ---------- poradnik ---------- */
+Views.poradnik = function (app) {
+  var isAdmin = S.me && S.me.role === "admin";
+  var isLogged = !!S.me;
+  app.innerHTML = '<div class="card" style="border-left:4px solid #ff6b35"><h2>📖 Poradnik – jak to działa?</h2>'
+    + '<p class="muted">Wszystko w jednym miejscu: rejestracja, Strava, wgrywanie plików i zasady anty-cheat.</p>'
+    + '<div class="tabs" style="margin:12px 0"><button class="active">Dla ucznia</button><button onclick="document.getElementById(\'teacher-guide\').scrollIntoView({behavior:\'smooth\'})">Dla nauczyciela/admina ↓</button></div>'
+    + '</div>'
+
+    + '<div class="card"><h3>🧒 Dla ucznia – 3 kroki do punktów</h3>'
+    + '<div class="grid g2">'
+    + '<div><h4>1️⃣ Załóż konto</h4><ol class="small"><li>Wejdź na <b>Rejestracja</b> → wpisz imię, e-mail, hasło (min. 6 znaków).</li><li>Wybierz <b>klasę</b> (np. 5A) – wybór jest jednorazowy, potem zmienia tylko admin.</li><li>Zaznacz RODO i kliknij <b>Załóż konto</b> – od razu jesteś zalogowany.</li></ol>'
+    + '<div class="small muted">Masz już Stravę? Możesz kliknąć <span class="chip">🟠 Zaloguj przez Stravę</span> – konto założy się samo!</div></div>'
+    + '<div><h4>2️⃣ Połącz sport</h4><ol class="small"><li>W <b>Profilu</b> znajdź <b>Połączone konta sportowe</b>.</li>'
+    + '<li><b>Strava (zalecane):</b> kliknij <b>Połącz przez Strava</b> → Zaloguj na Strava → <b>Authorize</b>. Wrócisz z napisem <span class="chip green">✅ Połączono</span>.</li>'
+    + '<li><b>Brak Stravy?</b> Kliknij <b>Wgraj plik GPX/TCX</b> (pod spodem) – wybierz plik wyeksportowany z zegarka / telefonu. Trafia do <b>akceptacji nauczyciela</b>.</li></ol>'
+    + '<div class="small muted">⌚ <b>Zegarki:</b> Garmin, Polar, Suunto, Coros, Apple Watch, Samsung, Amazfit, Huawei… – włącz w ich aplikacji <i>synchronizację ze Stravą</i> (Ustawienia → Połączone aplikacje), a treningi spłyną same.</div></div>'
+    + '</div>'
+    + '<div style="margin-top:12px"><h4>3️⃣ Zdobywaj punkty</h4><ul class="small"><li><b>Synchronizuj</b> w Profilu po każdym treningu – pobierze nowe aktywności z ostatnich 30 dni.</li><li>Lub <b>wgraj GPX</b> → czekaj na ✅ akceptację → punkty naliczą się automatycznie.</li><li>Sprawdzaj <b>Misje</b> (dzienne/tygodniowe) i <b>Odznaki</b> – za każdą dostajesz punkty i dodatki do avatara.</li></ul>'
+    + '<div class="card" style="background:#fff7e6;border:1px solid #ffcc80"><b>⛔ Anty-cheat:</b> Ręczne wpisywanie km jest <b>wyłączone dla uczniów</b> – liczą się tylko prawdziwe dane z GPS (Strava / plik GPX). Tylko <b>administrator</b> może dodać ręcznie w celach testowych.</div>'
+    + '</div></div>'
+
+    + '<div class="card" id="teacher-guide" style="background:#f8fafc"><h3>🧑‍🏫 Dla nauczyciela / admina</h3>'
+    + '<div class="grid g2">'
+    + '<div><h4>🏫 Klasy</h4><p class="small"><b>Admin → Klasy → Dodaj klasę</b> (np. 4A, 5B). Uczniowie wybierają ją przy rejestracji. Usuniesz tylko pustą klasę.</p>'
+    + '<h4>✅ Akceptacja plików</h4><p class="small"><b>Admin → Oczekujące</b> – lista plików GPX/TCX od uczniów. Klikasz <span class="chip green">Zatwierdź</span> (dodaje punkty) lub <span class="chip red">Odrzuć</span>. Uczeń widzi status w Profilu.</p></div>'
+    + '<div><h4>🟠 Strava – konfiguracja (raz)</h4><ol class="small"><li>Na <b>strava.com/settings/api</b> stwórz apkę (potrzebny darmowy 14-dniowy trial Stravy – po skopiowaniu kluczy możesz anulować, apka zostaje).</li><li><b>Website:</b> <code>https://sportowa-szkola-1.onrender.com</code><br><b>Callback Domain:</b> <code>sportowa-szkola-1.onrender.com</code></li><li>Skopiuj <b>Client ID</b> i <b>Client Secret</b> → wklej w <b>Admin → Integracje → Zapisz</b>.</li></ol>'
+    + '<h4>👥 Użytkownicy</h4><p class="small"><b>Admin → Użytkownicy</b> – zmiana roli (uczeń/nauczyciel/admin), klasy, usuwanie (RODO).</p></div>'
+    + '</div></div>'
+
+    + '<div class="grid g2">'
+    + '<div class="card"><h3>📤 Jak wyeksportować GPX?</h3><ul class="small"><li><b>Strava:</b> Wejdź w aktywność → <b>··· → Export GPX</b>.</li><li><b>Garmin Connect:</b> Aktywność → <b>⚙️ → Export to GPX</b>.</li><li><b>Telefon (Strava, MapMyRun):</b> Zapisz trening → udostępnij jako GPX.</li><li>Potem w Profilu → <b>Wgraj plik GPX/TCX</b> → wybierz plik.</li></ul></div>'
+    + '<div class="card"><h3>❓ FAQ</h3><details class="small" open><summary><b>Czy Strava jest płatna?</b></summary><p>Tworzenie apki wymaga kliknięcia <i>Rozpocznij okres próbny</i> (14 dni za darmo, możesz od razu anulować). Same konto ucznia na Strava jest darmowe.</p></details>'
+    + '<details class="small"><summary><b>Moja aktywność nie przyszła ze Stravy?</b></summary><p>Kliknij w Profilu <b>Synchronizuj</b> dopiero po zapisaniu treningu na Strava. Pobieramy 30 dni wstecz – duplikaty są pomijane.</p></details>'
+    + '<details class="small"><summary><b>Dlaczego strona czasem długo się ładuje?</b></summary><p>Darmowy Render usypia po 15 min bez ruchu (do 50s wybudzenia). Wkrótce włączymy automatyczne wybudzanie.</p></details></div>'
+    + '</div>'
+
+    + '<div class="center mt"><a class="btn btn-accent" href="#/profil">Przejdź do Profilu →</a> <a class="btn" href="#/">🏠 Strona główna</a></div>';
+};
 
 /* ---------- RODO ---------- */
 Views.polityka = function (app) {
