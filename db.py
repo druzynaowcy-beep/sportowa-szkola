@@ -451,11 +451,13 @@ def migrate():
             con.execute(f"ALTER TABLE {t} ADD COLUMN IF NOT EXISTS {c} {typ}")
         con.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_act_ext "
                     "ON activities(provider, external_id)")
+        con.execute("INSERT INTO settings(\"key\", \"value\") VALUES('school_code', 'Spotowadziewiatka') ON CONFLICT(\"key\") DO NOTHING")
         con.commit()
         con.close()
         return
     con = sqlite3.connect(DB_PATH)
     con.execute("CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT)")
+    con.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('school_code', 'Spotowadziewiatka')")
     con.execute("""CREATE TABLE IF NOT EXISTS pending_activities(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL REFERENCES users(id),

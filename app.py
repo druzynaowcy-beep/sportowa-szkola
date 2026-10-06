@@ -195,6 +195,18 @@ def me_dict(uid):
     d["avatar_items_available"] = logic.available_items(uid)
     return d
 
+def get_school_code():
+    db = get_db()
+    r = db.execute("SELECT value FROM settings WHERE key='school_code'").fetchone()
+    if r and r["value"]:
+        return r["value"]
+    return "Spotowadziewiatka"
+
+def set_school_code(code):
+    db = get_db()
+    db.execute("INSERT INTO settings(key, value) VALUES('school_code', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (code,))
+    db.commit()
+
 
 def paginate(items, page, per_page):
     total = len(items)
@@ -252,6 +264,11 @@ def register():
         return jsonify({"error": "Podaj imie i nazwisko."}), 400
     if not data.get("rodo"):
         return jsonify({"error": "Musisz zaakceptowac polityke prywatnosci (RODO)."}), 400
+    # Kod szkoły - anty-spam / tylko dla uczniów z Waszej szkoły
+    provided = (data.get("school_code") or "").strip()
+    expected = get_school_code()
+    if not provided or provided != expected:
+        return jsonify({"error": f"Nieprawidłowy kod szkoły. Poproś nauczyciela o kod."}), 400
     db = get_db()
     if class_id:
         c = db.execute("SELECT id FROM classes WHERE id=?", (class_id,)).fetchone()
@@ -1421,6 +1438,23 @@ def admin_clear_strava():
     strava.del_setting("strava_client_id")
     strava.del_setting("strava_client_secret")
     return jsonify({"ok": True})
+
+@app.get("/api/admin/school-code")
+@login_required
+@admin_required
+def admin_get_school_code():
+    return jsonify({"school_code": get_school_code()})
+
+@app.post("/api/admin/school-code")
+@login_required
+@admin_required
+def admin_set_school_code():
+    data = request.get_json(force=True) or {}
+    code = (data.get("school_code") or "").strip()
+    if len(code) < 3 or len(code) > 30:
+        return jsonify({"error": "Kod szkoły musi mieć 3-30 znaków."}), 400
+    set_school_code(code)
+    return jsonify({"ok": True, "school_code": code})
 
 
 # --- zadania cykliczne (cron) ---

@@ -217,13 +217,14 @@ Views.register = function (app) {
     '<label>E-mail</label><input class="input" name="email" type="email" required>' +
     '<label>Hasło (min. 6 znaków)</label><input class="input" name="password" type="password" required minlength="6">' +
     '<label>Klasa</label><select class="select" name="class_id"><option value="">— wybierz —</option>' + opts + "</select>" +
+    '<label>Kod szkoły *</label><input class="input" name="school_code" required placeholder="np. Spotowadziewiatka"><div class="small muted">Kod otrzymasz od nauczyciela (zabezpieczenie przed obcymi).</div>' +
     '<label class="check"><input type="checkbox" name="rodo" required><span>Akceptuję <a href="#/polityka" target="_blank">politykę prywatności</a> i wyrażam zgodę na przetwarzanie danych (RODO). *</span></label>' +
     '<div class="mt"><button class="btn btn-accent" style="width:100%">Załóż konto</button></div></form>' +
     '<p class="small muted">Kontynuując, potwierdzasz zapoznanie się z zasadami. Zmiana klasy możliwa tylko przez administratora.</p></div>';
   document.getElementById("f").addEventListener("submit", function (e) {
     e.preventDefault();
     var fd = {name: e.target.name.value, email: e.target.email.value, password: e.target.password.value,
-      class_id: e.target.class_id.value ? parseInt(e.target.class_id.value, 10) : null, rodo: e.target.rodo.checked};
+      class_id: e.target.class_id.value ? parseInt(e.target.class_id.value, 10) : null, rodo: e.target.rodo.checked, school_code: e.target.school_code.value};
     POST("/api/register", fd).then(function (d) {
       S.me = d.me; renderNav(); renderUserbox(); location.hash = "#/profil"; toast("Konto utworzone. Powodzenia! 🎉");
     }).catch(handleErr);
@@ -762,6 +763,7 @@ Views.admin = function (app) {
     '<button data-t="classes" class="' + (AD.tab === "classes" ? "active" : "") + '">🏫 Klasy</button>' +
     '<button data-t="missions" class="' + (AD.tab === "missions" ? "active" : "") + '">🎯 Misje</button>' +
     '<button data-t="pending" class="' + (AD.tab === "pending" ? "active" : "") + '">⏳ Oczekujące</button>' +
+    '<button data-t="settings" class="' + (AD.tab === "settings" ? "active" : "") + '">🔑 Kod szkoły</button>' +
     '<button data-t="exp" class="' + (AD.tab === "exp" ? "active" : "") + '">📥 Eksport</button>' +
     '<button data-t="integr" class="' + (AD.tab === "integr" ? "active" : "") + '">🔌 Integracje</button></div>' +
     '<div id="adbody"></div></div>';
@@ -892,6 +894,17 @@ Views.admin = function (app) {
       }).catch(handleErr);
     }
     loadPending();
+  } else if (AD.tab === "settings") {
+    body.innerHTML = '<div class="card"><h3>🔑 Kod szkoły</h3><p class="small muted">Kod wymagany przy rejestracji – zna go tylko Wasza szkoła (anty-spam). Aktualny kod: <b id="curCode">ładowanie…</b></p>'
+      + '<form class="form" id="codeForm"><label>Nowy kod szkoły (3-30 znaków)</label><input class="input" name="school_code" required minlength="3" maxlength="30" placeholder="np. Spotowadziewiatka"><div class="mt"><button class="btn btn-primary btn-small">💾 Zapisz kod</button></div></form>'
+      + '<p class="small muted">Podaj nowy kod uczniom (np. na lekcji). Stary przestanie działać.</p></div>';
+    GET("/api/admin/school-code").then(function(d){ document.getElementById("curCode").textContent = d.school_code; document.querySelector("#codeForm input").value = d.school_code; }).catch(function(){});
+    document.getElementById("codeForm").addEventListener("submit", function(e){
+      e.preventDefault();
+      POST("/api/admin/school-code", {school_code: e.target.school_code.value}).then(function(d){
+        toast("Zapisano kod szkoły: "+d.school_code,"ok"); document.getElementById("curCode").textContent = d.school_code;
+      }).catch(handleErr);
+    });
   } else if (AD.tab === "integr") {
     GET("/api/admin/integrations").then(function (d) {
       var s = d.strava;
